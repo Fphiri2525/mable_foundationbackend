@@ -6,13 +6,21 @@ const fs = require('fs');
 const multer = require('multer');
 
 // =====================================
-// 1️⃣ CREATE UPLOAD FOLDER IF NOT EXISTS
+// 1️⃣ CONFIGURE UPLOADS PATH (Railway Volume Support)
 // =====================================
-const uploadPath = path.join(__dirname, '..', 'uploads');
+// Check if we're on Railway with a volume
+const isRailway = !!process.env.RAILWAY_VOLUME_MOUNT_PATH;
+const uploadPath = isRailway
+    ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'uploads')
+    : path.join(__dirname, '..', 'uploads');
 
+console.log('📁 Activity Routes - Upload path:', uploadPath);
+console.log('📁 Activity Routes - Railway volume:', isRailway ? 'Yes' : 'No');
+
+// Create upload folder if it doesn't exist
 if (!fs.existsSync(uploadPath)) {
     fs.mkdirSync(uploadPath, { recursive: true });
-    console.log('Created uploads directory at:', uploadPath);
+    console.log('📁 Created uploads directory at:', uploadPath);
 }
 
 // =====================================
@@ -27,7 +35,7 @@ const storage = multer.diskStorage({
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         const fileExt = path.extname(file.originalname);
         const fileName = uniqueSuffix + fileExt;
-        console.log('Saving file as:', fileName);
+        console.log('📁 Saving file as:', fileName);
         cb(null, fileName);
     }
 });
@@ -48,23 +56,22 @@ const upload = multer({
 });
 
 // =====================================
-// Helper: Generate Full URL
+// Helper: Generate Full URL Dynamically
 // =====================================
-const getFullMediaUrl = (filename) => {
-    // Use localhost:5000 as base URL
-    const baseUrl = 'http://localhost:5000';
-    const url = `${baseUrl}/uploads/${filename}`;
-    console.log('Generated URL:', url);
-    return url;
+const getFullMediaUrl = (req, filename) => {
+    // Build URL dynamically from request
+    const protocol = req.protocol;
+    const host = req.get('host');
+    return `${protocol}://${host}/uploads/${filename}`;
 };
 
 // =====================================
 // 3️⃣ ADD ACTIVITY + MULTIPLE PHOTOS
 // =====================================
 router.post('/', upload.array('photos', 10), (req, res) => {
-    console.log('Received POST request to add activity');
-    console.log('Files received:', req.files ? req.files.length : 0);
-    console.log('Body:', req.body);
+    console.log('📍 Received POST request to add activity');
+    console.log('📍 Files received:', req.files ? req.files.length : 0);
+    console.log('📍 Body:', req.body);
 
     const { title, activity_date, location, amount_used, description } = req.body;
 
@@ -79,12 +86,12 @@ router.post('/', upload.array('photos', 10), (req, res) => {
 
     db.query(activitySql, [title, activity_date, location, amount_used, description], (err, result) => {
         if (err) {
-            console.error('Error creating activity:', err);
+            console.error('❌ Error creating activity:', err);
             return res.status(500).json({ error: err.message });
         }
 
         const activityId = result.insertId;
-        console.log('Activity created with ID:', activityId);
+        console.log('✅ Activity created with ID:', activityId);
 
         // If images uploaded
         if (req.files && req.files.length > 0) {
@@ -94,17 +101,23 @@ router.post('/', upload.array('photos', 10), (req, res) => {
 
             db.query(mediaSql, [mediaValues], (err2) => {
                 if (err2) {
-                    console.error('Error saving media:', err2);
+                    console.error('❌ Error saving media:', err2);
                     return res.status(500).json({ error: err2.message });
                 }
+
+                // Verify files were saved
+                req.files.forEach(file => {
+                    const filePath = path.join(uploadPath, file.filename);
+                    console.log(`📁 File ${file.filename} exists: ${fs.existsSync(filePath)} at ${filePath}`);
+                });
 
                 // Return the full URLs for the uploaded images
                 const uploadedImages = req.files.map(file => ({
                     filename: file.filename,
-                    url: getFullMediaUrl(file.filename)
+                    url: getFullMediaUrl(req, file.filename)
                 }));
 
-                console.log('Images saved:', uploadedImages);
+                console.log('✅ Images saved:', uploadedImages);
 
                 res.status(201).json({
                     message: "Activity & photos added successfully",
@@ -261,7 +274,7 @@ router.get('/recent/limit/:count', (req, res) => {
 
     db.query(sql, [count], (err, results) => {
         if (err) {
-            console.error('Error fetching recent activities:', err);
+            console.error('❌ Error fetching recent activities:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -294,7 +307,7 @@ router.get('/range', (req, res) => {
 
     db.query(sql, params, (err, results) => {
         if (err) {
-            console.error('Error fetching activities by range:', err);
+            console.error('❌ Error fetching activities by range:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -320,7 +333,7 @@ router.get('/most-photos', (req, res) => {
 
     db.query(sql, (err, result) => {
         if (err) {
-            console.error('Error fetching activity with most photos:', err);
+            console.error('❌ Error fetching activity with most photos:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -337,13 +350,13 @@ router.get('/most-photos', (req, res) => {
 // =====================================
 router.get('/:id', (req, res) => {
     const { id } = req.params;
-    console.log('Fetching activity with ID:', id);
+    console.log('📍 Fetching activity with ID:', id);
 
     const activitySql = `SELECT * FROM activities WHERE id = ?`;
 
     db.query(activitySql, [id], (err, activityResult) => {
         if (err) {
-            console.error('Error fetching activity:', err);
+            console.error('❌ Error fetching activity:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -352,13 +365,13 @@ router.get('/:id', (req, res) => {
         }
 
         const activity = activityResult[0];
-        console.log('Activity found:', activity.title);
+        console.log('✅ Activity found:', activity.title);
 
         const mediaSql = `SELECT id AS media_id, image FROM activity_media WHERE activity_id = ?`;
 
         db.query(mediaSql, [id], (err, mediaResult) => {
             if (err) {
-                console.error('Error fetching media:', err);
+                console.error('❌ Error fetching media:', err);
                 return res.status(500).json({ error: err.message });
             }
 
@@ -368,18 +381,18 @@ router.get('/:id', (req, res) => {
                 const fileExists = fs.existsSync(filePath);
                 
                 if (!fileExists) {
-                    console.warn('File not found:', filePath);
+                    console.warn('⚠️ File not found:', filePath);
                 }
 
                 return {
                     media_id: media.media_id,
-                    media_url: getFullMediaUrl(media.image),
+                    media_url: getFullMediaUrl(req, media.image),
                     filename: media.image,
                     exists: fileExists
                 };
             });
 
-            console.log('Media found:', media.length);
+            console.log('✅ Media found:', media.length);
 
             const response = {
                 id: activity.id,
@@ -400,7 +413,7 @@ router.get('/:id', (req, res) => {
 // 1️⃣2️⃣ GET ALL ACTIVITIES WITH PHOTOS
 // =====================================
 router.get('/', (req, res) => {
-    console.log('Fetching all activities');
+    console.log('📍 Fetching all activities');
 
     const sql = `
         SELECT a.*, m.id AS media_id, m.image
@@ -411,7 +424,7 @@ router.get('/', (req, res) => {
 
     db.query(sql, (err, results) => {
         if (err) {
-            console.error('Error fetching activities:', err);
+            console.error('❌ Error fetching activities:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -440,16 +453,16 @@ router.get('/', (req, res) => {
                 if (fileExists) {
                     map[row.id].media.push({
                         media_id: row.media_id,
-                        media_url: getFullMediaUrl(row.image),
+                        media_url: getFullMediaUrl(req, row.image),
                         filename: row.image
                     });
                 } else {
-                    console.warn('File not found for media ID', row.media_id, ':', filePath);
+                    console.warn('⚠️ File not found for media ID', row.media_id, ':', filePath);
                 }
             }
         });
 
-        console.log('Returning', activities.length, 'activities');
+        console.log('✅ Returning', activities.length, 'activities');
         res.json(activities);
     });
 });
@@ -461,8 +474,8 @@ router.put('/:id', upload.array('photos', 10), (req, res) => {
     const { id } = req.params;
     const { title, activity_date, location, amount_used, description } = req.body;
 
-    console.log('Updating activity ID:', id);
-    console.log('Files received:', req.files ? req.files.length : 0);
+    console.log('📍 Updating activity ID:', id);
+    console.log('📍 Files received:', req.files ? req.files.length : 0);
 
     if (!title || !activity_date || !location || !amount_used || !description) {
         return res.status(400).json({ message: "All fields required" });
@@ -476,7 +489,7 @@ router.put('/:id', upload.array('photos', 10), (req, res) => {
 
     db.query(updateSql, [title, activity_date, location, amount_used, description, id], (err, result) => {
         if (err) {
-            console.error('Error updating activity:', err);
+            console.error('❌ Error updating activity:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -491,14 +504,14 @@ router.put('/:id', upload.array('photos', 10), (req, res) => {
 
             db.query(mediaSql, [mediaValues], (err2) => {
                 if (err2) {
-                    console.error('Error saving new photos:', err2);
+                    console.error('❌ Error saving new photos:', err2);
                     return res.status(500).json({ error: err2.message });
                 }
 
                 // Return the URLs of uploaded images
                 const uploadedImages = req.files.map(file => ({
                     filename: file.filename,
-                    url: getFullMediaUrl(file.filename)
+                    url: getFullMediaUrl(req, file.filename)
                 }));
 
                 res.json({
@@ -522,8 +535,8 @@ router.put('/:id', upload.array('photos', 10), (req, res) => {
 router.post('/media/batch/:activityId', upload.array('photos', 10), (req, res) => {
     const { activityId } = req.params;
 
-    console.log('Adding photos to activity ID:', activityId);
-    console.log('Files received:', req.files ? req.files.length : 0);
+    console.log('📍 Adding photos to activity ID:', activityId);
+    console.log('📍 Files received:', req.files ? req.files.length : 0);
 
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ message: "No photos uploaded" });
@@ -532,7 +545,7 @@ router.post('/media/batch/:activityId', upload.array('photos', 10), (req, res) =
     const checkSql = `SELECT id FROM activities WHERE id = ?`;
     db.query(checkSql, [activityId], (err, result) => {
         if (err) {
-            console.error('Error checking activity:', err);
+            console.error('❌ Error checking activity:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -545,17 +558,17 @@ router.post('/media/batch/:activityId', upload.array('photos', 10), (req, res) =
 
         db.query(sql, [mediaValues], (err2) => {
             if (err2) {
-                console.error('Error saving photos:', err2);
+                console.error('❌ Error saving photos:', err2);
                 return res.status(500).json({ error: err2.message });
             }
 
             // Return the URLs of uploaded images
             const uploadedImages = req.files.map(file => ({
                 filename: file.filename,
-                url: getFullMediaUrl(file.filename)
+                url: getFullMediaUrl(req, file.filename)
             }));
 
-            console.log('Photos added:', uploadedImages);
+            console.log('✅ Photos added:', uploadedImages);
 
             res.json({
                 message: "Photos added successfully",
@@ -571,13 +584,13 @@ router.post('/media/batch/:activityId', upload.array('photos', 10), (req, res) =
 // =====================================
 router.delete('/media/:mediaId', (req, res) => {
     const { mediaId } = req.params;
-    console.log('Deleting media ID:', mediaId);
+    console.log('📍 Deleting media ID:', mediaId);
 
     const getImageSql = `SELECT image FROM activity_media WHERE id = ?`;
     
     db.query(getImageSql, [mediaId], (err, result) => {
         if (err) {
-            console.error('Error fetching media:', err);
+            console.error('❌ Error fetching media:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -591,7 +604,7 @@ router.delete('/media/:mediaId', (req, res) => {
         
         db.query(deleteSql, [mediaId], (err2) => {
             if (err2) {
-                console.error('Error deleting media from DB:', err2);
+                console.error('❌ Error deleting media from DB:', err2);
                 return res.status(500).json({ error: err2.message });
             }
 
@@ -599,7 +612,7 @@ router.delete('/media/:mediaId', (req, res) => {
             const filePath = path.join(uploadPath, imageFile);
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
-                console.log('Deleted file:', filePath);
+                console.log('✅ Deleted file:', filePath);
             }
 
             res.json({ message: "Media deleted successfully" });
@@ -612,13 +625,13 @@ router.delete('/media/:mediaId', (req, res) => {
 // =====================================
 router.delete('/:id', (req, res) => {
     const { id } = req.params;
-    console.log('Deleting activity ID:', id);
+    console.log('📍 Deleting activity ID:', id);
 
     const getImagesSql = `SELECT image FROM activity_media WHERE activity_id = ?`;
 
     db.query(getImagesSql, [id], (err, images) => {
         if (err) {
-            console.error('Error fetching images:', err);
+            console.error('❌ Error fetching images:', err);
             return res.status(500).json({ error: err.message });
         }
 
@@ -627,13 +640,13 @@ router.delete('/:id', (req, res) => {
             const filePath = path.join(uploadPath, img.image);
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
-                console.log('Deleted file:', filePath);
+                console.log('✅ Deleted file:', filePath);
             }
         });
 
         db.query(`DELETE FROM activities WHERE id = ?`, [id], (err2, result) => {
             if (err2) {
-                console.error('Error deleting activity:', err2);
+                console.error('❌ Error deleting activity:', err2);
                 return res.status(500).json({ error: err2.message });
             }
             
