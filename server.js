@@ -1,5 +1,7 @@
-// ✅ Load environment variables FIRST
-require('dotenv').config();
+// ✅ Load environment variables FIRST (only in development)
+if (process.env.NODE_ENV !== 'production') {
+  require('dotenv').config();
+}
 
 const express = require('express');
 const cors = require('cors');
@@ -16,7 +18,6 @@ app.use(express.urlencoded({ extended: true }));
 // ========================================
 // ✅ CONFIGURE UPLOADS PATH (Railway Volume Support)
 // ========================================
-// Check if we're on Railway with a volume
 const isRailway = !!process.env.RAILWAY_VOLUME_MOUNT_PATH;
 const uploadPath = isRailway
     ? path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH, 'uploads')
